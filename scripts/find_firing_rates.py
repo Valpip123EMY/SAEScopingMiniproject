@@ -8,7 +8,7 @@ from jaxtyping import Integer, Float
 from beartype import beartype
 import torch
 import tqdm
-from datasets import Dataset, concatenate_datasets
+from datasets import Dataset, concatenate_datasets, load_dataset
 from transformers import (
     PreTrainedModel,
     PreTrainedTokenizerBase,
@@ -16,6 +16,7 @@ from transformers import (
     AutoTokenizer,
 )
 from safetensors.torch import save_file
+from sae_lens import SAE
 from sae_scoping.trainers.sae_enhanced.rank import rank_neurons
 
 """
@@ -99,7 +100,7 @@ def rank_neurons_shim(
 
 # TODO(Adriano) don't hardcode lol plz
 @click.command()
-@click.option("--datasets", "-d", type=str, default="biology,apps,ultrachat")
+@click.option("--datasets", "-d", type=str, default="chemistry,apps,ultrachat")
 @click.option("--ignore_paddings", "-i", type=str, default="True,False")
 @click.option("--batch-size", "-b", type=int, default=7)
 def cli(datasets: str, ignore_paddings: str, batch_size: int):
@@ -111,23 +112,31 @@ def cli(datasets: str, ignore_paddings: str, batch_size: int):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     assert isinstance(tokenizer, PreTrainedTokenizerBase)
     assert tokenizer.pad_token is not None
-    dataset = None  # TODO(contributor) you will want to be able to load the dataset here somehow
+
+    chem_data = load_dataset("4gate/StemQAMixture", "chemistry", split="train")
+    apps_data = load_dataset("codeparrot/apps", split="train")
+    ultrachat_data = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
+
+    # rank_neurons expects a Dataset with a "text" column of raw strings and tokenizes internally
+    chem_dataset = chem_data.select_columns(["question"]).rename_column("question", "text")
+    apps_dataset = apps_data.select_columns(["question"]).rename_column("question", "text")
+
+    def extract_ultrachat_text(examples):
+        return {"text": [next((m["content"] for m in msgs if m["role"] == "user"), "") for msgs in examples["messages"]]}
+    ultrachat_dataset = ultrachat_data.map(extract_ultrachat_text, batched=True, remove_columns=ultrachat_data.column_names)
 
     # 2. Load model
-    model = Gemma2ForCausalLM.from_pretrained("google/gemma-2-9b-it", device_map="cpu", torch_dtype=torch.bfloat16)
-    model = model.to(device)  # you sohuld have set cuda visible devices
+    model = Gemma2ForCausalLM.from_pretrained(model_name, device_map="cpu", torch_dtype=torch.bfloat16)
+    model = model.to(device)
 
     # 3. For each SAE, run through inference on this
     output_folder = Path(__file__).parent / ".cache"
     datasets_and_names = [
-        (
-            dataset,
-            "dataset_name",
-        ),  # TODO(contributor) you will want to be able to name the dataset here
-        # TODO(contributor) you should add other entries like this:
-        # (other_dataset, "other_dataset_name"),
-        # ...
+        (chem_dataset, "stemqa_chemistry"),
+        (apps_dataset, "apps"),
+        (ultrachat_dataset, "ultrachat"),
     ]
+    
     datasets = list(set(list(map(str.strip, datasets.split(",")))))
     datasets_and_names = [x for x in datasets_and_names if x[1] in datasets]
 

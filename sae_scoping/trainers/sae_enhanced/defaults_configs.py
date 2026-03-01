@@ -41,7 +41,7 @@ def get_default_grpo_config(
     )
 
 
-def default_sft_config(
+def get_default_sft_config(
     wandb_run_name: str,
     kwargs: dict[str, Any],
 ) -> SFTConfig:
