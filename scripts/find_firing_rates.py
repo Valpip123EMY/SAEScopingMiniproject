@@ -16,6 +16,7 @@ from transformers import (
     AutoTokenizer,
 )
 from safetensors.torch import save_file
+from sae_lens import SAE
 from sae_scoping.trainers.sae_enhanced.rank import rank_neurons
 
 """
