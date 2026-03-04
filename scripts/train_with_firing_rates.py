@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import json
 import re
 from pathlib import Path
 import os
 import click
 import torch
 from beartype import beartype
-from datasets import concatenate_datasets
+from datasets import concatenate_datasets, load_dataset
 from sae_lens import SAE
 from safetensors.torch import load_file
 from transformers import AutoTokenizer, Gemma2ForCausalLM, PreTrainedTokenizerBase
@@ -117,9 +118,46 @@ def _main(
         pruned_sae = pruned_sae.to(device)
 
     # 5. Build training and evaluation datasets
-    # TODO contributor, you will want to have train and test datasets and then have a dictionary of
-    # <dataset_name>: <dataset>["train"] and <dataset>["test"]
-    all_eval_datasets = {} # <--- fill in test here
+    # In-domain: chemistry and biology from 4gate/StemQAMixture
+    # Out-of-domain: codeparrot/apps (coding) and HuggingFaceH4/ultrachat_200k (general chat)
+    chemistry_raw = load_dataset("4gate/StemQAMixture", "chemistry", split="train")
+    biology_raw = load_dataset("4gate/StemQAMixture", "biology", split="train")
+    apps_raw = load_dataset("codeparrot/apps", split="train")
+    ultrachat_raw = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
+
+    def _format_stemqa(example):
+        return {"text": f"Question: {example['question']}\nAnswer: {example['answer']}"}
+
+    def _format_apps(example):
+        try:
+            solutions = json.loads(example.get("solutions", "[]"))
+            solution = solutions[0] if solutions else ""
+        except (ValueError, TypeError):
+            solution = ""
+        return {"text": f"Question: {example['question']}\nSolution: {solution}"}
+
+    def _format_ultrachat(example):
+        return {"text": "\n".join(f"{m.get('role', 'unknown').capitalize()}: {m.get('content', '')}" for m in example["messages"])}
+
+    chem_formatted = chemistry_raw.map(_format_stemqa, remove_columns=chemistry_raw.column_names)
+    bio_formatted = biology_raw.map(_format_stemqa, remove_columns=biology_raw.column_names)
+    apps_formatted = apps_raw.map(_format_apps, remove_columns=apps_raw.column_names)
+    ultrachat_formatted = ultrachat_raw.map(_format_ultrachat, remove_columns=ultrachat_raw.column_names)
+
+    def _split(dataset):
+        return dataset.train_test_split(test_size=min(eval_test_size, len(dataset) - 1), seed=42)
+
+    chem_split = _split(chem_formatted)
+    bio_split = _split(bio_formatted)
+    apps_split = _split(apps_formatted)
+    ultrachat_split = _split(ultrachat_formatted)
+
+    all_eval_datasets = {
+        "chemistry": chem_split["test"],
+        "biology": bio_split["test"],
+        "apps": apps_split["test"],
+        "ultrachat": ultrachat_split["test"],
+    }
     # Filter eval datasets if specified
     if eval_on_datasets is not None:
         eval_dataset_names = [name.strip() for name in eval_on_datasets.split(",")]
@@ -131,7 +169,10 @@ def _main(
     else:
         eval_datasets = all_eval_datasets
         print(f"Evaluating on all datasets: {list(eval_datasets.keys())}")
-    train_datasets = {} # TODO(contributor) fill in train here
+    train_datasets = {
+        "chemistry": chem_split["train"],
+        "biology": bio_split["train"],
+    }
     if train_on_dataset not in train_datasets:
         raise ValueError(f"Invalid train on dataset: {train_on_dataset}")
     train_dataset = train_datasets[train_on_dataset]
