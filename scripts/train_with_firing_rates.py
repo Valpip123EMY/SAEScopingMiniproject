@@ -299,6 +299,13 @@ def _main(
     default=None,  # None => infer from the checkpoint threshold (we only need to pass if we train vanilla)
     help="Min firing rate to keep neuron (default: None, uses model checkpoint threshold)",
 )
+@click.option(
+    "--output-dir",
+    "-o",
+    type=str,
+    default=None,
+    help="Directory to save checkpoints (default: auto-generated from SAE ID and threshold)",
+)
 def main(
     dist_path: str,
     batch_size: int,
@@ -314,6 +321,7 @@ def main(
     eval_on_datasets: str | None,
     eval_test_size: int,
     threshold: float | None,
+    output_dir: str | None,
 ) -> None:
     r"""
     Example with benign recovery training in-domain (NOTE in this we limit how many
@@ -350,6 +358,7 @@ def main(
         eval_on_datasets=eval_on_datasets,
         eval_test_size=eval_test_size,
         threshold=threshold,
+        output_dir=output_dir,
     )
 
 

@@ -103,7 +103,9 @@ def rank_neurons_shim(
 @click.option("--datasets", "-d", type=str, default="chemistry,biology,apps,ultrachat")
 @click.option("--ignore_paddings", "-i", type=str, default="True,False")
 @click.option("--batch-size", "-b", type=int, default=7)
-def cli(datasets: str, ignore_paddings: str, batch_size: int):
+@click.option("--max-samples", "-n", type=int, default=None, help="Max samples per dataset (None = all)")
+@click.option("--cache-dir", "-o", type=str, default=None, help="Output cache directory (default: scripts/.cache next to this script)")
+def cli(datasets: str, ignore_paddings: str, batch_size: int, max_samples: int | None, cache_dir: str | None):
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 1. Load dataset and tokenize it
     print("=" * 100)
@@ -132,7 +134,7 @@ def cli(datasets: str, ignore_paddings: str, batch_size: int):
     model = model.to(device)
 
     # 3. For each SAE, run through inference on this
-    output_folder = Path(__file__).parent / ".cache"
+    output_folder = Path(cache_dir) if cache_dir is not None else Path(__file__).parent / ".cache"
     datasets_and_names = [
         (chem_dataset, "chemistry"),
         (bio_dataset, "biology"),
@@ -155,8 +157,12 @@ def cli(datasets: str, ignore_paddings: str, batch_size: int):
         subfolder = output_folder / f"ignore_padding_{ignore_padding}" / dataset_name / sae_id.replace("/", "--")
         if subfolder.exists():
             continue
+        if max_samples is not None:
+            dataset_to_use = dataset.select(range(min(max_samples, len(dataset))))
+        else:
+            dataset_to_use = dataset
         _, distribution = rank_neurons_shim(
-            tokenized=dataset,
+            tokenized=dataset_to_use,
             sae_id=sae_id,
             sae_release=GEMMA2_9B_SAE_RELEASE,
             model=model,
