@@ -235,7 +235,7 @@ def _main(
         T=0.0,
         hookpoint=hookpoint,
         save_output=save_output,
-        sft_config=sft_config,
+        trainer_config=sft_config,
         wandb_project_name=wandb_project_name,
         wandb_run_name=wandb_run_name,
     )
